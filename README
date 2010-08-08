@@ -1,0 +1,11 @@
+Ratemap Plugin for B3
+Version 1.0 (alpha)
+Author - Rhidalin Bytes
+This plugin provides a means of rating maps while in game.
+This is especially useful for servers running custom maps
+To install this plugin:
+    run the ratemap.sql
+    configure your security settings in ratemap.xml
+    Copy to your extplugins folder
+    add plugin line to your b3.xml
+This plugin was written for python 2.6 or later.
