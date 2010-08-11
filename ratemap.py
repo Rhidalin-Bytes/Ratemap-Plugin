@@ -1,13 +1,30 @@
+##################################################################
+#
+# Ratemap
+# map-rating plugin for B3 (www.bigbrotherbot.com)
+# (c) 2010 Brian Markland (ttlogic@xlr8or.com)
+#
+# This program is free software and licensed under the terms of
+# the GNU General Public License (GPL), version 2.
+#
+# Ratings are stored in two tables and maplist is refreshed
+# on map change so a list of all maps used is available
+#
+# More functions to come soon, including
+#       topmap, top 10, worstmap among others
+#
+##################################################################
+# CHANGELOG
+# 2010/08/11 - Initial Release
 # Ratemap plugin
 
-# By storing ratings in this two table manner, we have a cumulative list of all maps being created
-# a simple b3.event added to this could get a list of all maps both for the report as well as 
-# for other functions within B3.
-__version__ = '1.0'
+__version__ = '1.0.0'
 __author__  = 'Rhidain_Bytes'
+__python__ = '2.6'
 
-import b3, re
+import b3
 import b3.events
+from string import capitalize
 
 class RatemapPlugin(b3.plugin.Plugin):
     _adminPlugin = None
@@ -16,12 +33,13 @@ class RatemapPlugin(b3.plugin.Plugin):
     _MAP_SELECT_QUERY = "SELECT id, mapname from ratemap WHERE mapname='%s'"
     _MAP_SELECTLIKE_QUERY = "SELECT id, mapname from ratemap WHERE mapname LIKE '%s'"
     _MAP_ADD_QUERY = "INSERT INTO ratemap (id, mapname) VALUES (NULL, '%s')"
-    _RATE_QUERY = "INSERT INTO rating (id, ratemap.id, rating) VALUES (NULL, '%s', '%s')"
-    _GETRATE_QUERY = "SELECT rating from rating WHERE ratemap.id='%s'"
-    _RESETRATE_QUERY = "DELETE FROM rating WHERE ratemap.id='%s'"
+    _RATE_QUERY = "INSERT INTO rating (id, map, rating) VALUES (NULL, '%s', '%s')"
+    _GETRATE_QUERY = "SELECT rating from rating WHERE map='%s'"
+    _RESETRATE_QUERY = "DELETE FROM rating WHERE map='%s'"
     _RESETALLRATE_QUERY = "TRUNCATE TABLE rating"
     _MAP_SELECTALL_QUERY = "SELECT * from ratemap"
-    
+    _REPORT_QUERY = "SELECT ratemap.mapname, AVG(rating.rating) AS ratings, MIN(rating.rating) AS mins, MAX(rating.rating) AS maxs FROM rating, ratemap WHERE rating.map = ratemap.id GROUP BY ratemap.mapname ORDER BY ratings DESC"
+    _MAP_REPORT_QUERY = "SELECT ratemap.mapname, AVG(rating.rating) AS ratings, MIN(rating.rating) AS mins, MAX(rating.rating) AS maxs FROM rating, ratemap WHERE rating.map = ratemap.id AND ratemap.mapname = '%s' GROUP BY ratemap.mapname ORDER BY ratings DESC"
     def startup(self):
         """\
         Initialize plugin settings
@@ -48,7 +66,11 @@ class RatemapPlugin(b3.plugin.Plugin):
             self.console.storage.query(self._MAP_SELECT_QUERY % 'test')
         except:
             self.debug('Error loading SQL, did you install the table?')
-    
+        
+        self.mapreportfile = self.config.get('settings', 'mapreportfile')
+        
+        self.debug('Saving report to %s' % self.mapreportfile)
+        
         self.debug('Started')
 
 
@@ -60,9 +82,10 @@ class RatemapPlugin(b3.plugin.Plugin):
 
         return None
     
-    def onEvent(self, event):
+    def handle(self, event):
         if event.type == b3.events.EVT_GAME_EXIT:
             checkratemap(mapnow())
+        self.debug('ran event')
 
     def cmd_ratemap(self, data, client=None, cmd=None):
         """\
@@ -75,15 +98,15 @@ class RatemapPlugin(b3.plugin.Plugin):
         if m[0] <= 0 and m[0] > 10:
             client.message('^7You must enter a number 1 to 10')
             return False
-        else:
-        map = mapnow()
+        map = self.mapnow()
         # made variable in case map changes mid command
-        checkratemap(map)
+        self.checkratemap(map)
         mule = self.console.storage.query(self._MAP_SELECT_QUERY % map)
-        rider = self.console.storage.query(self._RATE_QUERY % (m[0], mule[0]))
+        saddle = mule.getRow()
+        rider = self.console.storage.query(self._RATE_QUERY % (saddle['id'], m[0]))
         rider.close()
         mule.close()
-        client.message('Thank you for rating %s' %s map)
+        client.message('Thank you for rating %s' % map)
         return True
         
     def cmd_maprating(self, data, client=None, cmd=None): #<mapname optional>
@@ -92,17 +115,17 @@ class RatemapPlugin(b3.plugin.Plugin):
         """
         m = self._adminPlugin.parseUserCmd(data)
         if not m:
-            map = mapnow()
+            map = self.mapnow()
         else:
             map = m[0]
         # okay, do we have a matching map?
-        mapi = findmap(map)
+        mapi = self.findmap(map)
         if mapi:
-            report = getreport(map)
-            for n in report
-                client.message(n)
+            report = self.getreport(map)
+            cmd.sayLoudOrPM(client, '%s' % report[0])
             return True
         else:
+            client('There was a problem finding the map')
             return False
                 
     def cmd_resetrating(self, data, client=None, cmd=None):# <mapname or all>
@@ -111,8 +134,8 @@ class RatemapPlugin(b3.plugin.Plugin):
         """
         m = self._adminPlugin.parseUserCmd(data)
         if not m:
-            map = self.console.getmapname
-        elif m = 'all':
+            map = self.mapnow()
+        elif m == 'all':
             rider = self.console.storage.query(self._RESETALLRATE_QUERY)
             rider.close()
             client.message('All map ratings have been reset')
@@ -124,32 +147,38 @@ class RatemapPlugin(b3.plugin.Plugin):
             cursor = self.console.storage.query(self._RESETRATE_QUERY % mapi)
             client.message('Map %s rating reset')
             return True
-            
-        
+    
     def cmd_mapreport(self, data=None, client=None, cmd=None):# <filename>                
         """\
         <mapname> Enter mapname or leave blank for current map rating
         """    
         m = self._adminPlugin.parseUserCmd(data)
         if not m and not self.mapreportfile:
-            client.message('You must specify a filename here or in config)
+            client.message('You must specify a filename here or in config')
             return False
-        elif self.mapreportfile:
-            mapreportfile = self.mapreportfile
-        else:
+        elif m:
             mapreportfile = m[0]
-        generate(report)
-        
-        write(report) to mapreportfile
+        else:
+            mapreportfile = self.mapreportfile
+        report = self.getreport()
+        if report:
+            self.savereport(mapreportfile, report)
+            if client:
+                client.message('Report generated')
+            return True
+        else:
+            if client:
+                client.message('There was a problem generating the report')
+            return False
 
 # Internal functions            
-    def mapnow(self)
+    def mapnow(self):
         map = self.console.getMap()
         map = map.strip().lower()
         if map[:3] == 'mp_': map = map[3:]
         return map
 
-    def checkratemap(self, map)
+    def checkratemap(self, map):
         mule = self.console.storage.query(self._MAP_SELECT_QUERY % map)
         if mule.rowcount == 0:
             cursor = self.console.storage.query(self._MAP_ADD_QUERY % (map))
@@ -158,46 +187,66 @@ class RatemapPlugin(b3.plugin.Plugin):
         mule.close()
         
     def findmap(self, map, client=None, cmd=None):
-        cursor=self.console.storage.query(self._MAP_SELECT_QUERY % map)
+        cursor = self.console.storage.query(self._MAP_SELECT_QUERY % map)
         if cursor.rowcount==0:
             cursor.close()
-            cursor=self.console.storage.query(self._MAP_SELECTLIKE_QUERY % map)
+            cursor.execute(self._MAP_SELECTLIKE_QUERY % map)
             if cursor.rowcount==0:
                 client.message('Unable to find %s' % map)
                 return False
             elif cursor.rowcount==1:
-                mapi = cursor[0]
+                mapi = cursor.getRow()
                 cursor.close()
-                return mapi
+                return mapi['id']
             else:
-                for line in cursor:
-                    l.append(cursor[1])
-                    cursor.nextrow()
-                client.message('Found %s maps, please select one' %s (len(l)))
-                client.message('%s' % (.join(l)))
+                while 1:
+                    mapi = cursor.getRow()
+                    if mapi:
+                        l.append(mapi['mapname'])
+                        cursor.moveNext()
+                    else:
+                        break
+                client.message('Found %s maps, please select one' % (len(l)))
+                client.message('%s' % (join(l)))
                 cursor.close()
                 return False
         else:
-            mapi = cursor[0]
+            mapi = cursor.getRow()
             cursor.close()
-            return mapi
+            return mapi['id']
             
-     def getreport(seq, map=None):  
-        report = ''
+    def getreport(self, map=None, client=None, cmd=None):  
+        report = []
         # get all mapnames
         if not map:
-            map = '*'
-        mapnames = self.console.storage.query(self._GET_SELECT_QUERY % map)
-        for n in mapnames:
-            mapi = n[0]
-            #index set, now pull ratings to get average
-            cursor = self.console.storage.query(self._GETRATE_QUERY % mapi)
-            rate = ''
-            for c in cursor:
-                rate.append(cursor(rating))
-            avg = float(sum(rate)) / len(rate)
-            lo = min(rate)
-            hi = max(rate)
-            report.append('%s rates a %s with low score %s and high score %s' % (n[1], avg, lo, hi)
-            cursor.close()
+            sheep = self.console.storage.query(self._REPORT_QUERY)
+        else:
+            sheep = self.console.storage.query(self._MAP_REPORT_QUERY % map)
+        n = 0
+        mapreport = []
+        self.debug('sheep.rowcount %s'% sheep.rowcount)
+        self.debug('sheep.getRow() %s'% sheep.getRow())
+        if sheep.rowcount==0:
+            self.debug('There was error reading the database.')
+            return False
+        else:
+            while 1:
+                mapi = sheep.getRow()
+                # {'mapname': 'harbor', 'ratings': Decimal('10.0000'), 'mins': 10L, 'maxs': 10L}
+                if mapi:
+                    mapname = mapi['mapname']
+                    rating = mapi['ratings']
+                    min = mapi['mins']
+                    max = mapi['maxs']
+                    self.debug('%s rates a %s with low score %s and high score %s' % (mapname, rating, min, max))
+                    report.append('%s rates a %s with low score %s and high score %s \n' % (capitalize(mapname), rating, min, max))
+                    sheep.moveNext()
+                else:
+                    sheep.close()
+                    break
         return report
+        
+    def savereport(self, mapreportfile, report):
+        f = open(mapreportfile, 'w')
+        f.writelines(report)
+        f.close()

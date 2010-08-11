@@ -6,7 +6,7 @@
         <set name="mapreport">40</set>
 	</settings>
 	<settings name="settings">
-        <!-- Set to None to enter filename in game (there are limitations to this) -->
-		<set name="mapreportfile">None</set>
+        <!-- Set to False to enter filename in game (there are limitations to this) -->
+		<set name="mapreportfile">@b3\logs\mapreport.txt</set>
 	</settings>
 </configuration>
