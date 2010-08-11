@@ -17,25 +17,31 @@
 # CHANGELOG
 # 2010/08/10 - Initial Release
 # 2010/08/11 - Help descritions corrected
+# 2010/08/11 - Added topmap command
+#            - sql update user and map = insert unique or update
+#            - Minimum time between map ratings
+#            - Minor tweaks
 # Ratemap plugin
 
-__version__ = '1.0.0'
+__version__ = '1.0.2'
 __author__  = 'Rhidain_Bytes'
 __python__ = '2.6'
 
 import b3
 import b3.events
 from string import capitalize
+from datetime import datetime, timedelta
 
 class RatemapPlugin(b3.plugin.Plugin):
     _adminPlugin = None
     mapreportfile = None
+    ratinghold = 0
 
     _MAP_SELECT_QUERY = "SELECT id, mapname from ratemap WHERE mapname='%s'"
     _MAP_SELECTLIKE_QUERY = "SELECT id, mapname from ratemap WHERE mapname LIKE '%s'"
     _MAP_ADD_QUERY = "INSERT INTO ratemap (id, mapname) VALUES (NULL, '%s')"
-    _RATE_QUERY = "INSERT INTO rating (id, map, rating) VALUES (NULL, '%s', '%s')"
-    _GETRATE_QUERY = "SELECT rating from rating WHERE map='%s'"
+    _RATE_QUERY = "INSERT INTO rating (id, map, rating, client_id, time) VALUES (NULL, '%s', '%s', '%s', NULL) ON DUPLICATE KEY UPDATE rating.rating = '%s'"
+    _CHECKRATE_QUERY = "SELECT time from rating WHERE map='%s' AND client_id = '%s'"
     _RESETRATE_QUERY = "DELETE FROM rating WHERE map='%s'"
     _RESETALLRATE_QUERY = "TRUNCATE TABLE rating"
     _MAP_SELECTALL_QUERY = "SELECT * from ratemap"
@@ -69,6 +75,7 @@ class RatemapPlugin(b3.plugin.Plugin):
             self.debug('Error loading SQL, did you install the table?')
         
         self.mapreportfile = self.config.get('settings', 'mapreportfile')
+        self.ratinghold = int(self.config.get('settings', 'wait_time'))
         
         self.debug('Saving report to %s' % self.mapreportfile)
         
@@ -92,6 +99,19 @@ class RatemapPlugin(b3.plugin.Plugin):
         """\
         <1 - 10> - Rate the current map
         """
+        map = self.mapnow()
+        # made variable in case map changes mid command
+        self.checkratemap(map)
+        mule = self.console.storage.query(self._MAP_SELECT_QUERY % map)
+        saddle = mule.getRow()
+        sheep = self.console.storage.query(self._CHECKRATE_QUERY % (saddle['id'], client.id))
+        if sheep.rowcount:
+            t = sheep.getRow()['time']
+            #if (datetime.now() - t) < (timedelta(hours=self.ratinghold)):
+            #    client.message('You must wait at least %s hours before rating %s again.' % (self.ratinghold, capitalize(map)))
+            #    return True
+        sheep.close()
+            #Check time against minimum time variable in XML
         m = self._adminPlugin.parseUserCmd(data)
         if not m:
             client.message('^7You must enter a number 1 to 10')
@@ -99,15 +119,10 @@ class RatemapPlugin(b3.plugin.Plugin):
         if m[0] <= 0 and m[0] > 10:
             client.message('^7You must enter a number 1 to 10')
             return False
-        map = self.mapnow()
-        # made variable in case map changes mid command
-        self.checkratemap(map)
-        mule = self.console.storage.query(self._MAP_SELECT_QUERY % map)
-        saddle = mule.getRow()
-        rider = self.console.storage.query(self._RATE_QUERY % (saddle['id'], m[0]))
+        rider = self.console.storage.query(self._RATE_QUERY % (saddle['id'], m[0], client.id, m[0]))
         rider.close()
         mule.close()
-        client.message('Thank you for rating %s' % map)
+        client.message('Thank you for rating %s' % capitalize(map))
         return True
         
     def cmd_maprating(self, data, client=None, cmd=None): #<mapname optional>
@@ -127,7 +142,18 @@ class RatemapPlugin(b3.plugin.Plugin):
         else:
             client('There was a problem finding the map')
             return False
-                
+        
+    def cmd_topmap(self, data, client=None, cmd=None):
+        """\
+        Returns the top map based on ratings
+        """
+        report = self.getreport()
+        if report:
+            cmd.sayLoudOrPM(client, '%s' % report[0])
+            return True
+        else:
+            client.message('There was a problem getting the results')
+            
     def cmd_resetrating(self, data, client=None, cmd=None):# <mapname or all>
         """\
         <mapname> Enter mapname or leave blank for current map
