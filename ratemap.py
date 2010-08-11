@@ -15,7 +15,8 @@
 #
 ##################################################################
 # CHANGELOG
-# 2010/08/11 - Initial Release
+# 2010/08/10 - Initial Release
+# 2010/08/11 - Help descritions corrected
 # Ratemap plugin
 
 __version__ = '1.0.0'
@@ -118,7 +119,6 @@ class RatemapPlugin(b3.plugin.Plugin):
             map = self.mapnow()
         else:
             map = m[0]
-        # okay, do we have a matching map?
         mapi = self.findmap(map)
         if mapi:
             report = self.getreport(map)
@@ -130,7 +130,7 @@ class RatemapPlugin(b3.plugin.Plugin):
                 
     def cmd_resetrating(self, data, client=None, cmd=None):# <mapname or all>
         """\
-        <mapname> Enter mapname or leave blank for current map rating
+        <mapname> Enter mapname or leave blank for current map
         """
         m = self._adminPlugin.parseUserCmd(data)
         if not m:
@@ -150,7 +150,7 @@ class RatemapPlugin(b3.plugin.Plugin):
     
     def cmd_mapreport(self, data=None, client=None, cmd=None):# <filename>                
         """\
-        <mapname> Enter mapname or leave blank for current map rating
+        <filename> Enter filename (limited) or leave blank if set
         """    
         m = self._adminPlugin.parseUserCmd(data)
         if not m and not self.mapreportfile:
